@@ -127,25 +127,63 @@ zz_ptr_t zz_posix_vm_allocate(zz_size_t size) {
 
 zz_ptr_t zz_posix_vm_allocate_near_pages(zz_addr_t address, zz_size_t range_size, zz_size_t n_pages) {
     zz_addr_t aligned_addr;
-    zz_ptr_t page_mmap;
-    zz_addr_t t;
     zz_size_t page_size;
+    zz_size_t length;
+    zz_size_t step;
+    unsigned int i;
+
     page_size = zz_posix_vm_get_page_size();
-
-    if (n_pages <= 0) {
+    if (page_size == 0 || address == 0)
+        return NULL;
+    if (n_pages == 0)
         n_pages = 1;
-    }
-    aligned_addr = (zz_addr_t)address & ~(page_size - 1);
+    if (n_pages > ((zz_size_t)-1) / page_size)
+        return NULL;
+    length = page_size * n_pages;
+    aligned_addr = address & ~((zz_addr_t)page_size - 1);
+    step = range_size / 32;
+    if (step < page_size)
+        step = page_size;
+    step = (step + page_size - 1) & ~((zz_size_t)page_size - 1);
 
-    zz_addr_t target_start_addr = aligned_addr - range_size;
-    zz_addr_t target_end_addr   = aligned_addr + range_size;
-
-    for (t = target_start_addr; t < target_end_addr; t += page_size) {
-        page_mmap = mmap((zz_ptr_t)t, page_size * n_pages, PROT_WRITE | PROT_READ,
-                         MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
-        if (page_mmap != MAP_FAILED) {
-            return (zz_ptr_t)page_mmap;
+    /*
+     * mmap's address is only a hint. Never use MAP_FIXED here: the old code
+     * could silently replace an unrelated mapping in the target process.
+     * Accept only mappings actually returned inside the requested branch
+     * window; otherwise unmap and try another hint.
+     */
+    for (i = 0; i < 65; ++i) {
+        zz_addr_t hint_addr;
+        zz_ptr_t mapped;
+        if (i == 0) {
+            hint_addr = aligned_addr;
+        } else if (i & 1) {
+            zz_size_t delta = ((zz_size_t)(i + 1) / 2) * step;
+            if (aligned_addr > (zz_addr_t)-1 - delta)
+                continue;
+            hint_addr = aligned_addr + delta;
+        } else {
+            zz_size_t delta = ((zz_size_t)i / 2) * step;
+            if (aligned_addr < delta)
+                continue;
+            hint_addr = aligned_addr - delta;
         }
+
+        mapped = mmap((zz_ptr_t)hint_addr, length, PROT_READ | PROT_WRITE,
+                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if (mapped == MAP_FAILED)
+            continue;
+
+        {
+            zz_addr_t result = (zz_addr_t)mapped;
+            zz_addr_t lower = aligned_addr > range_size ? aligned_addr - range_size : 0;
+            zz_addr_t upper = aligned_addr + range_size;
+            if (upper < aligned_addr)
+                upper = (zz_addr_t)-1;
+            if (result >= lower && result <= upper && length <= upper - result)
+                return mapped;
+        }
+        munmap(mapped, length);
     }
     return NULL;
 }
@@ -189,42 +227,89 @@ zz_ptr_t zz_posix_vm_search_text_code_cave(zz_addr_t address, zz_size_t range_si
   http://shakthimaan.com/downloads/hurd/A.Programmers.Guide.to.the.Mach.System.Calls.pdf
 */
 
+static bool zz_posix_vm_query_protection(zz_addr_t address, int *protection) {
+    FILE *maps;
+    char line[512];
+    unsigned long start, end;
+    char permissions[5];
+
+    maps = fopen("/proc/self/maps", "r");
+    if (!maps)
+        return FALSE;
+
+    while (fgets(line, sizeof(line), maps)) {
+        if (sscanf(line, "%lx-%lx %4s", &start, &end, permissions) != 3)
+            continue;
+        if (address < (zz_addr_t)start || address >= (zz_addr_t)end)
+            continue;
+        *protection = (permissions[0] == 'r' ? PROT_READ : 0) |
+                      (permissions[1] == 'w' ? PROT_WRITE : 0) |
+                      (permissions[2] == 'x' ? PROT_EXEC : 0);
+        fclose(maps);
+        return TRUE;
+    }
+    fclose(maps);
+    return FALSE;
+}
+
 bool zz_posix_vm_patch_code(const zz_addr_t address, const zz_ptr_t codedata, zz_size_t codedata_size) {
     zz_size_t page_size;
-    zz_addr_t start_page_addr, end_page_addr;
-    zz_size_t page_offset, range_size;
+    zz_addr_t first_page, last_page;
+    zz_size_t page_count, i;
+    int *original_protections;
+    bool ok = TRUE;
+
+    if (!address || !codedata || codedata_size == 0)
+        return FALSE;
 
     page_size = zz_posix_vm_get_page_size();
-    /*
-      https://www.gnu.org/software/hurd/gnumach-doc/Memory-Attributes.html
-     */
-    start_page_addr = (address) & ~(page_size - 1);
-    end_page_addr   = ((address + codedata_size - 1)) & ~(page_size - 1);
-    page_offset     = address - start_page_addr;
-    range_size      = (end_page_addr + page_size) - start_page_addr;
+    if (page_size == 0 || (page_size & (page_size - 1)) != 0)
+        return FALSE;
+    if (codedata_size - 1 > (zz_size_t)((zz_addr_t)-1 - address))
+        return FALSE;
 
-    //  another method, pelease read `REF`;
+    first_page = address & ~((zz_addr_t)page_size - 1);
+    last_page = (address + codedata_size - 1) & ~((zz_addr_t)page_size - 1);
+    page_count = (zz_size_t)((last_page - first_page) / page_size) + 1;
+    if (page_count > ((zz_size_t)-1) / sizeof(int))
+        return FALSE;
 
-    // zz_ptr_t code_mmap = mmap(NULL, range_size, PROT_READ | PROT_WRITE,
-    //                           MAP_ANON | MAP_SHARED, -1, 0);
-    // if (code_mmap == MAP_FAILED) {
-    //   return;
-    // }
+    original_protections = (int *)malloc(page_count * sizeof(int));
+    if (!original_protections)
+        return FALSE;
 
-    zz_ptr_t code_mmap = zz_posix_vm_allocate(range_size);
+    for (i = 0; i < page_count; ++i) {
+        zz_addr_t page = first_page + i * page_size;
+        if (!zz_posix_vm_query_protection(page, &original_protections[i])) {
+            free(original_protections);
+            return FALSE;
+        }
+    }
 
-    memcpy(code_mmap, (void *)start_page_addr, range_size);
+    /* Preserve each page's original permissions after the patch. */
+    for (i = 0; i < page_count; ++i) {
+        zz_addr_t page = first_page + i * page_size;
+        int writable = original_protections[i] | PROT_READ | PROT_WRITE;
+        if (mprotect((zz_ptr_t)page, page_size, writable) != 0) {
+            size_t restore;
+            for (restore = 0; restore < i; ++restore) {
+                zz_addr_t old_page = first_page + restore * page_size;
+                (void)mprotect((zz_ptr_t)old_page, page_size, original_protections[restore]);
+            }
+            free(original_protections);
+            return FALSE;
+        }
+    }
 
-    memcpy(code_mmap + page_offset, codedata, codedata_size);
+    memcpy((void *)address, codedata, codedata_size);
+    __builtin___clear_cache((char *)address, (char *)(address + codedata_size));
 
-    /* SAME: mprotect(code_mmap, range_size, prot); */
-    // if (!zz_posix_vm_protect((zz_addr_t)code_mmap, range_size, PROT_READ | PROT_EXEC))
-    //     return FALSE;
+    for (i = 0; i < page_count; ++i) {
+        zz_addr_t page = first_page + i * page_size;
+        if (mprotect((zz_ptr_t)page, page_size, original_protections[i]) != 0)
+            ok = FALSE;
+    }
 
-    zz_addr_t target = (zz_addr_t)start_page_addr;
-    zz_posxi_vm_protect_as_writable(start_page_addr, range_size);
-    memcpy((zz_ptr_t)start_page_addr, (zz_ptr_t)code_mmap, range_size);
-    zz_posix_vm_protect_as_executable(start_page_addr, range_size);
-    munmap(code_mmap, range_size);
-    return TRUE;
+    free(original_protections);
+    return ok;
 }
