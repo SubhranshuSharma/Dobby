@@ -8,9 +8,9 @@
 #   make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi- SYSROOT=/path/to/uclibc-sysroot
 
 CROSS_COMPILE ?= arm-linux-gnueabi-
-CC      ?= $(CROSS_COMPILE)gcc
-AR      ?= $(CROSS_COMPILE)ar
-RANLIB  ?= $(CROSS_COMPILE)ranlib
+CC      = $(CROSS_COMPILE)gcc
+AR      = $(CROSS_COMPILE)ar
+RANLIB  = $(CROSS_COMPILE)ranlib
 
 SYSROOT_FLAGS := $(if $(SYSROOT),--sysroot=$(SYSROOT),)
 TARGET_FLAGS  := -march=armv5tej -marm -mabi=aapcs-linux -mfloat-abi=soft \
@@ -46,7 +46,7 @@ $(BUILD_DIR)/libhookzz.a: $(OBJECTS)
 	$(RANLIB) $@
 
 print-sources:
-	@printf '%s\n' $(SOURCES)
+	@printf '%s\\n' $(SOURCES)
 
 clean:
 	rm -rf $(BUILD_DIR)
