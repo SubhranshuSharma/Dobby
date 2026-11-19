@@ -1,0 +1,26 @@
+name: ARMv5 Linux build
+
+on:
+  push:
+    branches:
+      - "port/armv5-linux-uclibc"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  armv5-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+      - name: Build ARMv5TEJ Linux library
+        run: make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi-
+      - name: Verify ELF architecture and ABI
+        run: |
+          arm-linux-gnueabi-readelf -h build/armv5-linux/libhookzz.so
+          arm-linux-gnueabi-readelf -A build/armv5-linux/libhookzz.so
