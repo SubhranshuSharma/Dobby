@@ -17,10 +17,20 @@ jobs:
       - name: Install ARM cross toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y make gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+          sudo apt-get install -y make gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi qemu-user
       - name: Build ARMv5TEJ Linux library
         run: make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi-
       - name: Verify ELF architecture and ABI
         run: |
           arm-linux-gnueabi-readelf -h build/armv5-linux/libhookzz.so
           arm-linux-gnueabi-readelf -A build/armv5-linux/libhookzz.so
+      - name: Build ARM-state hook smoke test
+        run: |
+          arm-linux-gnueabi-gcc -march=armv5tej -marm -mabi=aapcs-linux -mfloat-abi=soft \
+            -O0 -fno-pie -no-pie -Iinclude tests/arm-linux/test_hook_arm.c \
+            -Lbuild/armv5-linux -lhookzz -Wl,-rpath,'$ORIGIN' \
+            -o build/armv5-linux/test_hook_arm
+      - name: Run hook smoke test on ARMv5TEJ emulation
+        run: |
+          qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi build/armv5-linux/test_hook_arm
+
