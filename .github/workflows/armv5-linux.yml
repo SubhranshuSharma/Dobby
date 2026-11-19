@@ -30,7 +30,16 @@ jobs:
             -O0 -fno-pie -no-pie -Iinclude tests/arm-linux/test_hook_arm.c \
             -Lbuild/armv5-linux -lhookzz -Wl,-rpath,'$ORIGIN' \
             -o build/armv5-linux/test_hook_arm
-      - name: Run hook smoke test on ARMv5TEJ emulation
+      - name: Run ARM-state hook smoke test on ARMv5TEJ emulation
         run: |
           qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi build/armv5-linux/test_hook_arm
+      - name: Build Thumb-state hook smoke test
+        run: |
+          arm-linux-gnueabi-gcc -march=armv5tej -mthumb -mabi=aapcs-linux -mfloat-abi=soft \
+            -O0 -fno-pie -no-pie -Iinclude tests/arm-linux/test_hook_arm.c \
+            -Lbuild/armv5-linux -lhookzz -Wl,-rpath,'$ORIGIN' \
+            -o build/armv5-linux/test_hook_thumb
+      - name: Run Thumb-state hook smoke test on ARMv5TEJ emulation
+        run: |
+          qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi build/armv5-linux/test_hook_thumb
 
