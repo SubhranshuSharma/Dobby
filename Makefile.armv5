@@ -1,0 +1,52 @@
+# Standalone ARMv5TEJ/Linux build.
+#
+# This is intentionally separate from the legacy Android/iOS Makefile. It builds
+# the in-process ARM32 HookZz backend; it does not provide a remote injector.
+#
+# Example:
+#   make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi-
+#   make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi- SYSROOT=/path/to/uclibc-sysroot
+
+CROSS_COMPILE ?= arm-linux-gnueabi-
+CC      ?= $(CROSS_COMPILE)gcc
+AR      ?= $(CROSS_COMPILE)ar
+RANLIB  ?= $(CROSS_COMPILE)ranlib
+
+SYSROOT_FLAGS := $(if $(SYSROOT),--sysroot=$(SYSROOT),)
+TARGET_FLAGS  := -march=armv5tej -marm -mabi=aapcs-linux -mfloat-abi=soft \
+                 -fPIC -fno-strict-aliasing
+CFLAGS   ?= -O2
+CPPFLAGS += $(SYSROOT_FLAGS) -Iinclude -Isrc -Isrc/kitzz -Isrc/kitzz/include
+CFLAGS   += $(TARGET_FLAGS) -Wall -Wextra
+LDFLAGS  += $(SYSROOT_FLAGS) -shared -Wl,--no-undefined
+LDLIBS   += -pthread
+
+BUILD_DIR := build/armv5-linux
+SOURCES := $(wildcard src/*.c) \
+           $(wildcard src/platforms/backend-posix/*.c) \
+           $(wildcard src/platforms/backend-linux/*.c) \
+           $(wildcard src/platforms/arch-arm/*.c) \
+           $(wildcard src/platforms/backend-arm/*.c) \
+           $(shell find src/kitzz/CommonKit src/kitzz/PosixKit src/kitzz/LinuxKit -type f -name '*.c' 2>/dev/null)
+OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
+
+.PHONY: all clean print-sources
+all: $(BUILD_DIR)/libhookzz.so $(BUILD_DIR)/libhookzz.a
+
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/libhookzz.so: $(OBJECTS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BUILD_DIR)/libhookzz.a: $(OBJECTS)
+	$(AR) rcs $@ $^
+	$(RANLIB) $@
+
+print-sources:
+	@printf '%s\n' $(SOURCES)
+
+clean:
+	rm -rf $(BUILD_DIR)
