@@ -9,6 +9,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: armv5-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   armv5-linux:
     runs-on: ubuntu-24.04
