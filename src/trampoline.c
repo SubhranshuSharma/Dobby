@@ -25,28 +25,39 @@ static void zz_flush_trampoline_page(zz_ptr_t code) {
 }
 
 ZZSTATUS ZzBuildTrampoline(struct _ZzInterceptorBackend *self, ZzHookFunctionEntry *entry) {
+    ZZSTATUS status;
+
+    if (!self || !entry)
+        return ZZ_FAILED;
+
+#define ZZ_BUILD_STEP(call) do { status = (call); if (status == ZZ_FAILED) return status; } while (0)
+
     if (entry->hook_type == HOOK_TYPE_ONE_INSTRUCTION) {
-        ZzPrepareTrampoline(self, entry);
-        ZzBuildEnterTrampoline(self, entry);
-        ZzBuildInsnLeaveTrampoline(self, entry);
-        ZzBuildInvokeTrampoline(self, entry);
+        ZZ_BUILD_STEP(ZzPrepareTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildEnterTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildInsnLeaveTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildInvokeTrampoline(self, entry));
     } else if (entry->hook_type == HOOK_TYPE_FUNCTION_via_PRE_POST) {
-        ZzPrepareTrampoline(self, entry);
-        ZzBuildEnterTrampoline(self, entry);
-        ZzBuildInvokeTrampoline(self, entry);
-        ZzBuildLeaveTrampoline(self, entry);
+        ZZ_BUILD_STEP(ZzPrepareTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildEnterTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildInvokeTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildLeaveTrampoline(self, entry));
     } else if (entry->hook_type == HOOK_TYPE_FUNCTION_via_REPLACE) {
-        ZzPrepareTrampoline(self, entry);
-        ZzBuildEnterTransferTrampoline(self, entry);
-        ZzBuildInvokeTrampoline(self, entry);
+        ZZ_BUILD_STEP(ZzPrepareTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildEnterTransferTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildInvokeTrampoline(self, entry));
     } else if (entry->hook_type == HOOK_TYPE_FUNCTION_via_GOT) {
-        ZzBuildEnterTrampoline(self, entry);
-        ZzBuildLeaveTrampoline(self, entry);
+        ZZ_BUILD_STEP(ZzBuildEnterTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildLeaveTrampoline(self, entry));
     } else if (entry->hook_type == HOOK_TYPE_DBI) {
-        ZzPrepareTrampoline(self, entry);
-        ZzBuildDynamicBinaryInstrumentationTrampoline(self, entry);
-        ZzBuildInvokeTrampoline(self, entry);
+        ZZ_BUILD_STEP(ZzPrepareTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildDynamicBinaryInstrumentationTrampoline(self, entry));
+        ZZ_BUILD_STEP(ZzBuildInvokeTrampoline(self, entry));
+    } else {
+        return ZZ_FAILED;
     }
+
+#undef ZZ_BUILD_STEP
 
     zz_flush_trampoline_page(entry->on_enter_transfer_trampoline);
     zz_flush_trampoline_page(entry->on_enter_trampoline);
@@ -54,5 +65,5 @@ ZZSTATUS ZzBuildTrampoline(struct _ZzInterceptorBackend *self, ZzHookFunctionEnt
     zz_flush_trampoline_page(entry->on_invoke_trampoline);
     zz_flush_trampoline_page(entry->on_leave_trampoline);
     zz_flush_trampoline_page(entry->on_dynamic_binary_instrumentation_trampoline);
-    return ZZ_DONE;
+    return ZZ_SUCCESS;
 }
