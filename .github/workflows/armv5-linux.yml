@@ -72,9 +72,19 @@ jobs:
           chmod +x ./dockcross-armv5-uclibc
           ./dockcross-armv5-uclibc bash -c '
             set -eux
+            # Dockcross exports CC and AR, but some image versions omit RANLIB.
+            # Derive missing binutils from the compiler prefix instead of using
+            # an unset variable under `set -u`.
+            AR="${AR:-${CC%gcc}ar}"
+            RANLIB="${RANLIB:-${CC%gcc}ranlib}"
+            export AR RANLIB
             echo "CC=$CC"
+            echo "AR=$AR"
+            echo "RANLIB=$RANLIB"
             "$CC" -dumpmachine
             "$CC" -v
+            command -v "$AR"
+            command -v "$RANLIB"
             make -f Makefile.armv5 CC="$CC" AR="$AR" RANLIB="$RANLIB"
             mkdir -p dist
             cp build/armv5-linux/libhookzz.so dist/libhookzz-armv5-uclibc.so
