@@ -298,54 +298,66 @@ ZZSTATUS ZzEnableHook(zz_ptr_t target_ptr) {
 }
 
 ZZSTATUS ZzDisableHook(zz_ptr_t target_ptr) {
-    ZZSTATUS status            = ZZ_DONE_ENABLE;
-    ZzInterceptor *interceptor = NULL;
-    ZzHookFunctionEntry *entry = NULL;
+    ZzInterceptor *interceptor;
+    ZzHookFunctionEntry *entry;
 
-    entry       = ZzFindHookFunctionEntry(target_ptr);
-    interceptor = ZzGlobalInterceptorInstance();
-    if (!interceptor) {
+    if (!target_ptr)
         return ZZ_FAILED;
-    }
+
+    interceptor = ZzGlobalInterceptorInstance();
+    if (!interceptor)
+        return ZZ_FAILED;
+
+    entry = ZzFindHookFunctionEntry(target_ptr);
+    if (!entry)
+        return ZZ_NO_BUILD_HOOK;
+    if (!entry->isEnabled)
+        return ZZ_SUCCESS;
 
     if (entry->hook_type == HOOK_TYPE_FUNCTION_via_GOT) {
-        ZzDisableHookGOT((const char *)target_ptr);
-    } else {
-        ZzMemoryPatchCode((const zz_addr_t)entry->origin_prologue.address, entry->origin_prologue.data,
-                          entry->origin_prologue.size);
+        /* Linux GOT hooks are deliberately unsupported until implemented. */
+        return ZzDisableHookGOT((const char *)target_ptr);
     }
 
-    entry->isEnabled = false;
+    if (!ZzMemoryPatchCode((const zz_addr_t)entry->origin_prologue.address,
+                           entry->origin_prologue.data, entry->origin_prologue.size))
+        return ZZ_FAILED;
 
-    return status;
+    entry->isEnabled = false;
+    return ZZ_SUCCESS;
 }
 
 ZZSTATUS ZzHook(zz_ptr_t target_ptr, zz_ptr_t replace_ptr, zz_ptr_t *origin_ptr, PRECALL pre_call_ptr,
                 POSTCALL post_call_ptr, bool try_near_jump) {
     ZZHOOKTYPE hook_type;
-    if (pre_call_ptr || post_call_ptr) {
-        hook_type = HOOK_TYPE_FUNCTION_via_PRE_POST;
-    } else {
-        hook_type = HOOK_TYPE_FUNCTION_via_REPLACE;
-    }
+    ZZSTATUS status;
 
-    ZzBuildHook(target_ptr, replace_ptr, origin_ptr, pre_call_ptr, post_call_ptr, try_near_jump, hook_type);
-    ZzEnableHook(target_ptr);
-    return ZZ_SUCCESS;
+    if (pre_call_ptr || post_call_ptr)
+        hook_type = HOOK_TYPE_FUNCTION_via_PRE_POST;
+    else
+        hook_type = HOOK_TYPE_FUNCTION_via_REPLACE;
+
+    status = ZzBuildHook(target_ptr, replace_ptr, origin_ptr, pre_call_ptr, post_call_ptr,
+                         try_near_jump, hook_type);
+    if (status != ZZ_DONE_HOOK)
+        return status;
+    return ZzEnableHook(target_ptr);
 }
 
 ZZSTATUS ZzHookPrePost(zz_ptr_t target_ptr, PRECALL pre_call_ptr, POSTCALL post_call_ptr) {
-    ZZSTATUS status = ZZ_SUCCESS;
-    status = ZzBuildHook(target_ptr, NULL, NULL, pre_call_ptr, post_call_ptr, FALSE, HOOK_TYPE_FUNCTION_via_PRE_POST);
-    status = ZzEnableHook(target_ptr);
-    return status;
+    ZZSTATUS status = ZzBuildHook(target_ptr, NULL, NULL, pre_call_ptr, post_call_ptr,
+                                  FALSE, HOOK_TYPE_FUNCTION_via_PRE_POST);
+    if (status != ZZ_DONE_HOOK)
+        return status;
+    return ZzEnableHook(target_ptr);
 }
 
 ZZSTATUS ZzHookReplace(zz_ptr_t target_ptr, zz_ptr_t replace_ptr, zz_ptr_t *origin_ptr) {
-    ZZSTATUS status = ZZ_SUCCESS;
-    status = ZzBuildHook(target_ptr, replace_ptr, origin_ptr, NULL, NULL, FALSE, HOOK_TYPE_FUNCTION_via_REPLACE);
-    status = ZzEnableHook(target_ptr);
-    return status;
+    ZZSTATUS status = ZzBuildHook(target_ptr, replace_ptr, origin_ptr, NULL, NULL,
+                                  FALSE, HOOK_TYPE_FUNCTION_via_REPLACE);
+    if (status != ZZ_DONE_HOOK)
+        return status;
+    return ZzEnableHook(target_ptr);
 }
 
 ZZSTATUS ZzDynamicBinaryInstrumentation(zz_ptr_t insn_address, STUBCALL stub_call_ptr) {
