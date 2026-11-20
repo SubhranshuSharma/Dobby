@@ -69,3 +69,8 @@ QQ: 858982985
 ```
 
 <img with="320px" height="320px" src="http://ww1.sinaimg.cn/large/a4decaedgy1foe7ta4t5oj20iq0ow75w.jpg" alt="qrcode">
+
+
+## Experimental ARMv5 Linux port
+
+An isolated Linux port is being developed for ARMv5TEJ/uClibc targets. It is not part of the upstream Android/iOS build and is not yet camera-validated. See [ARMv5 Linux port status](docs/ARMV5_LINUX_PORT.md) for verified coverage, limitations, and build instructions.
