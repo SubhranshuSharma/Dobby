@@ -26,20 +26,19 @@ char *zz_vm_read_string(const zz_ptr_t address) {
 
 zz_ptr_t zz_vm_search_data(const zz_ptr_t start_addr, zz_ptr_t end_addr, char *data, zz_size_t data_len) {
     zz_ptr_t curr_addr;
-    if (start_addr <= 0)
-        ZZ_ERROR_LOG("search address start_addr(%p) < 0", (zz_ptr_t)start_addr);
-    if (start_addr > end_addr)
-        ZZ_ERROR_LOG("search start_add(%p) < end_addr(%p)", (zz_ptr_t)start_addr, (zz_ptr_t)end_addr);
+
+    if (!start_addr || !data || data_len == 0 || start_addr >= end_addr)
+        return NULL;
 
     curr_addr = start_addr;
-
-    while (end_addr > curr_addr) {
-        if (!memcmp(curr_addr, data, data_len)) {
+    /* ARM and Thumb code caves are at least halfword aligned. Search every
+     * halfword and never read beyond the mapping end. */
+    while (curr_addr <= end_addr && (zz_size_t)(end_addr - curr_addr) >= data_len) {
+        if (!memcmp(curr_addr, data, data_len))
             return curr_addr;
-        }
-        curr_addr += data_len;
+        curr_addr += 2;
     }
-    return 0;
+    return NULL;
 }
 
 zz_addr_t zz_vm_align_floor(zz_addr_t address, zz_size_t range_size) {
