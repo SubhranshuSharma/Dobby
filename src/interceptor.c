@@ -207,7 +207,14 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
 
 ZZSTATUS ZzBuildHookGOT(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *origin_ptr, PRECALL pre_call_ptr,
                         POSTCALL post_call_ptr) {
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__linux__)
+    (void)target_ptr;
+    (void)replace_call_ptr;
+    (void)origin_ptr;
+    (void)pre_call_ptr;
+    (void)post_call_ptr;
+    return ZZ_FAILED;
+#elif defined(__i386__) || defined(__x86_64__)
     HookZzDebugInfoLog("%s", "x86 & x86_64 arch not support");
     return ZZ_FAILED;
 #endif
