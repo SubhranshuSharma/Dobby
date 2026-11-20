@@ -35,7 +35,8 @@ int main(void) {
     if (status != ZZ_FAILED || before != 22 || hooked != 22 || calls != 0 || after != 22)
         return 1;
 #else
-    if (before != 22 || hooked != 122 || calls != 1 || after != 22)
+    if (status != ZZ_DONE_ENABLE || disabled != ZZ_SUCCESS ||
+        before != 22 || hooked != 122 || calls != 1 || after != 22)
         return 1;
 #endif
     return 0;
