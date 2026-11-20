@@ -162,8 +162,7 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
 
     ZZSTATUS status                                 = ZZ_DONE_HOOK;
     ZzInterceptor *interceptor                      = NULL;
-    ZzHookFunctionEntrySet *hook_function_entry_set = NULL;
-    ZzHookFunctionEntry *entry                      = NULL;
+    ZzHookFunctionEntry *entry = NULL;
 
     if (!target_ptr)
         return ZZ_FAILED;
@@ -171,7 +170,8 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
     interceptor = ZzGlobalInterceptorInstance();
     if (!interceptor || !interceptor->backend)
         return ZZ_FAILED;
-    hook_function_entry_set = &(interceptor->hook_function_entry_set);
+    if (hook_type == HOOK_TYPE_FUNCTION_via_REPLACE && !replace_call_ptr)
+        return ZZ_FAILED;
 
     if (ZzFindHookFunctionEntry(target_ptr))
         return ZZ_ALREADY_HOOK;
@@ -184,6 +184,7 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
                                   post_call_ptr, try_near_jump);
     status = ZzBuildTrampoline(interceptor->backend, entry);
     if (status == ZZ_FAILED) {
+        ZzThreadFreeThreadLocalKeyPtr(entry->thread_local_key);
         if (entry->backend)
             free(entry->backend);
         free(entry);
@@ -192,6 +193,7 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
 
     status = ZzAddHookFunctionEntry(entry);
     if (status != ZZ_SUCCESS) {
+        ZzThreadFreeThreadLocalKeyPtr(entry->thread_local_key);
         if (entry->backend)
             free(entry->backend);
         free(entry);
