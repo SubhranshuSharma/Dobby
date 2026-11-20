@@ -8,13 +8,27 @@ on:
     branches:
       - master
   workflow_dispatch:
+    inputs:
+      publish_prerelease:
+        description: Publish the ARMv5/uClibc build as a GitHub prerelease
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Prerelease tag (used only when publish_prerelease is true)
+        required: true
+        type: string
+        default: armv5-uclibc-v0.1.0
 
 concurrency:
   group: armv5-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  armv5-linux:
+  armv5-linux-smoke:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +36,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi qemu-user
-      - name: Build ARMv5TEJ Linux library
+      - name: Build ARMv5TEJ Linux library (glibc smoke build)
         run: make -f Makefile.armv5 CROSS_COMPILE=arm-linux-gnueabi-
       - name: Verify ELF architecture and ABI
         run: |
@@ -43,7 +57,61 @@ jobs:
             -O0 -fno-pie -no-pie -DEXPECT_THUMB_UNSUPPORTED=1 -Iinclude tests/arm-linux/test_hook_arm.c \
             -Lbuild/armv5-linux -lhookzz -Wl,-rpath,'$ORIGIN' \
             -o build/armv5-linux/test_hook_thumb
-      - name: Run Thumb-state hook smoke test on ARMv5TEJ emulation
+      - name: Run Thumb-state hook rejection test on ARMv5TEJ emulation
         run: |
           qemu-arm -cpu arm926 -L /usr/arm-linux-gnueabi build/armv5-linux/test_hook_thumb
 
+  armv5-uclibc-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ARMv5/uClibc cross toolchain
+        run: |
+          set -euxo pipefail
+          docker run --rm dockcross/linux-armv5-uclibc > ./dockcross-armv5-uclibc
+          chmod +x ./dockcross-armv5-uclibc
+          ./dockcross-armv5-uclibc bash -c '
+            set -eux
+            echo "CC=$CC"
+            "$CC" -dumpmachine
+            "$CC" -v
+            make -f Makefile.armv5 CC="$CC" AR="$AR" RANLIB="$RANLIB"
+            mkdir -p dist
+            cp build/armv5-linux/libhookzz.so dist/libhookzz-armv5-uclibc.so
+            cp build/armv5-linux/libhookzz.a dist/libhookzz-armv5-uclibc.a
+            {
+              echo "Target compiler: $CC"
+              "$CC" -dumpmachine
+              "$CC" -v 2>&1
+            } > dist/toolchain.txt
+          '
+          readelf -h -A -d dist/libhookzz-armv5-uclibc.so | tee dist/elf-inspection.txt
+          sha256sum dist/libhookzz-armv5-uclibc.so dist/libhookzz-armv5-uclibc.a > dist/SHA256SUMS
+      - name: Upload ARMv5/uClibc build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dobby-armv5-uclibc
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-prerelease:
+    needs: [armv5-linux-smoke, armv5-uclibc-build]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_prerelease }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download ARMv5/uClibc build
+        uses: actions/download-artifact@v4
+        with:
+          name: dobby-armv5-uclibc
+          path: dist
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: Dobby ARMv5 uClibc ${{ inputs.release_tag }}
+          prerelease: true
+          generate_release_notes: true
+          files: dist/*
