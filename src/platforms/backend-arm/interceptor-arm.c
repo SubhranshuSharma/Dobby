@@ -88,6 +88,19 @@ ZZSTATUS ZzPrepareTrampoline(ZzInterceptorBackend *self, ZzHookFunctionEntry *en
     if (is_thumb)
         target_addr = (zz_addr_t)entry->target_ptr & ~(zz_addr_t)1;
 
+#if defined(__ARM_ARCH) && (__ARM_ARCH < 7)
+    /*
+     * The current Thumb writer emits Thumb-2 encodings in several relocation
+     * paths. ARMv5TEJ implements Thumb-1 only. Reject these hooks before any
+     * trampoline bytes are emitted; never install an instruction stream the
+     * target CPU cannot execute. ARM-state hooks remain supported.
+     */
+    if (is_thumb) {
+        ZZ_ERROR_LOG_STR("Thumb hooks are disabled on ARMv5: backend requires Thumb-2");
+        return ZZ_FAILED;
+    }
+#endif
+
     if (is_thumb) {
         if (entry->try_near_jump) {
             entry_backend->redirect_code_size = ZZ_THUMB_TINY_REDIRECT_SIZE;
@@ -262,7 +275,11 @@ ZZSTATUS ZzBuildEnterTrampoline(ZzInterceptorBackend *self, ZzHookFunctionEntry 
     if (entry->hook_type != HOOK_TYPE_FUNCTION_via_GOT) {
         if ((is_thumb && entry_backend->redirect_code_size == ZZ_THUMB_TINY_REDIRECT_SIZE) ||
             (!is_thumb && entry_backend->redirect_code_size == ZZ_ARM_TINY_REDIRECT_SIZE)) {
-            ZzBuildEnterTransferTrampoline(self, entry);
+            status = ZzBuildEnterTransferTrampoline(self, entry);
+            if (status == ZZ_FAILED) {
+                free(code_slice);
+                return status;
+            }
         }
     }
     // debug log
@@ -316,7 +333,11 @@ ZZSTATUS ZzBuildDynamicBinaryInstrumentationTrampoline(ZzInterceptorBackend *sel
     // build the double trampline aka enter_transfer_trampoline
     if ((is_thumb && entry_backend->redirect_code_size == ZZ_THUMB_TINY_REDIRECT_SIZE) ||
         (!is_thumb && entry_backend->redirect_code_size == ZZ_ARM_TINY_REDIRECT_SIZE)) {
-        ZzBuildEnterTransferTrampoline(self, entry);
+        status = ZzBuildEnterTransferTrampoline(self, entry);
+        if (status == ZZ_FAILED) {
+            free(code_slice);
+            return status;
+        }
     }
 
     // debug log
