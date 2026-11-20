@@ -107,7 +107,9 @@ jobs:
 
   publish-prerelease:
     needs: [armv5-linux-smoke, armv5-uclibc-build]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_prerelease }}
+    # Publish a prerelease automatically after a successful branch push.
+    # Manual dispatch can still opt in explicitly.
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_prerelease) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
