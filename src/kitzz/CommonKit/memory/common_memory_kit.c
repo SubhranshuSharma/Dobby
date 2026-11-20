@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -25,18 +26,18 @@ char *zz_vm_read_string(const zz_ptr_t address) {
 }
 
 zz_ptr_t zz_vm_search_data(const zz_ptr_t start_addr, zz_ptr_t end_addr, char *data, zz_size_t data_len) {
-    zz_ptr_t curr_addr;
+    uintptr_t current = (uintptr_t)start_addr;
+    uintptr_t end = (uintptr_t)end_addr;
 
-    if (!start_addr || !data || data_len == 0 || start_addr >= end_addr)
+    if (!current || !data || data_len == 0 || current >= end)
         return NULL;
 
-    curr_addr = start_addr;
     /* ARM and Thumb code caves are at least halfword aligned. Search every
      * halfword and never read beyond the mapping end. */
-    while (curr_addr <= end_addr && (zz_size_t)(end_addr - curr_addr) >= data_len) {
-        if (!memcmp(curr_addr, data, data_len))
-            return curr_addr;
-        curr_addr += 2;
+    while (current <= end && (zz_size_t)(end - current) >= data_len) {
+        if (!memcmp((const void *)current, data, data_len))
+            return (zz_ptr_t)current;
+        current += 2;
     }
     return NULL;
 }
