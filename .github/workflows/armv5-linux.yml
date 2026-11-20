@@ -27,7 +27,7 @@ jobs:
       - name: Build ARM-state hook smoke test
         run: |
           arm-linux-gnueabi-gcc -march=armv5tej -marm -mabi=aapcs-linux -mfloat-abi=soft \
-            -O0 -fno-pie -no-pie -Iinclude tests/arm-linux/test_hook_arm.c \
+            -O0 -fno-pie -no-pie -DEXPECT_THUMB_UNSUPPORTED=1 -Iinclude tests/arm-linux/test_hook_arm.c \
             -Lbuild/armv5-linux -lhookzz -Wl,-rpath,'$ORIGIN' \
             -o build/armv5-linux/test_hook_arm
       - name: Run ARM-state hook smoke test on ARMv5TEJ emulation
