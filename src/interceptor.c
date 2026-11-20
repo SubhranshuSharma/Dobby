@@ -384,27 +384,45 @@ ZZSTATUS ZzHookReplace(zz_ptr_t target_ptr, zz_ptr_t replace_ptr, zz_ptr_t *orig
 }
 
 ZZSTATUS ZzDynamicBinaryInstrumentation(zz_ptr_t insn_address, STUBCALL stub_call_ptr) {
-    ZZSTATUS status = ZZ_SUCCESS;
+    ZZSTATUS status;
     ZzInterceptor *interceptor;
     ZzHookFunctionEntry *entry;
+
+    if (!insn_address || !stub_call_ptr)
+        return ZZ_FAILED;
+
     interceptor = ZzGlobalInterceptorInstance();
-    if (!interceptor) {
+    if (!interceptor || !interceptor->backend)
+        return ZZ_FAILED;
+
+    if (ZzFindHookFunctionEntry(insn_address))
+        return ZZ_ALREADY_HOOK;
+
+    entry = (ZzHookFunctionEntry *)zz_malloc_with_zero(sizeof(ZzHookFunctionEntry));
+    if (!entry)
+        return ZZ_FAILED;
+
+    ZzInitializeHookFunctionEntry(entry, HOOK_TYPE_DBI, insn_address, NULL, NULL, NULL, true);
+    entry->stub_call = stub_call_ptr;
+    status = ZzBuildTrampoline(interceptor->backend, entry);
+    if (status == ZZ_FAILED) {
+        ZzThreadFreeThreadLocalKeyPtr(entry->thread_local_key);
+        if (entry->backend)
+            free(entry->backend);
+        free(entry);
         return ZZ_FAILED;
     }
 
-    // check is already hooked ?
-    if (ZzFindHookFunctionEntry(insn_address)) {
-        status = ZZ_ALREADY_HOOK;
-        return status;
+    status = ZzAddHookFunctionEntry(entry);
+    if (status != ZZ_SUCCESS) {
+        ZzThreadFreeThreadLocalKeyPtr(entry->thread_local_key);
+        if (entry->backend)
+            free(entry->backend);
+        free(entry);
+        return ZZ_FAILED;
     }
-    entry = (ZzHookFunctionEntry *)zz_malloc_with_zero(sizeof(ZzHookFunctionEntry));
-    ZzInitializeHookFunctionEntry(entry, HOOK_TYPE_DBI, insn_address, NULL, NULL, NULL, true);
-    entry->stub_call = stub_call_ptr;
-    ZzBuildTrampoline(interceptor->backend, entry);
-    ZzAddHookFunctionEntry(entry);
 
-    status = ZzEnableHook(insn_address);
-    return status;
+    return ZzEnableHook(insn_address);
 }
 
 ZZSTATUS ZzHookOneInstruction(zz_ptr_t insn_address, PRECALL pre_call_ptr, POSTCALL post_call_ptr, bool try_near_jump) {
