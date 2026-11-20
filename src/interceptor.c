@@ -165,30 +165,42 @@ ZZSTATUS ZzBuildHook(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *o
     ZzHookFunctionEntrySet *hook_function_entry_set = NULL;
     ZzHookFunctionEntry *entry                      = NULL;
 
-    interceptor = ZzGlobalInterceptorInstance();
-    if (!interceptor) {
+    if (!target_ptr)
         return ZZ_FAILED;
-    }
+
+    interceptor = ZzGlobalInterceptorInstance();
+    if (!interceptor || !interceptor->backend)
+        return ZZ_FAILED;
     hook_function_entry_set = &(interceptor->hook_function_entry_set);
 
-    do {
-        // check is already hooked ?
-        if (ZzFindHookFunctionEntry(target_ptr)) {
-            status = ZZ_ALREADY_HOOK;
-            break;
-        }
-        entry = (ZzHookFunctionEntry *)zz_malloc_with_zero(sizeof(ZzHookFunctionEntry));
+    if (ZzFindHookFunctionEntry(target_ptr))
+        return ZZ_ALREADY_HOOK;
 
-        // TODO: check return status
-        ZzInitializeHookFunctionEntry(entry, hook_type, target_ptr, replace_call_ptr, pre_call_ptr, post_call_ptr,
-                                      try_near_jump);
-        ZzBuildTrampoline(interceptor->backend, entry);
-        ZzAddHookFunctionEntry(entry);
+    entry = (ZzHookFunctionEntry *)zz_malloc_with_zero(sizeof(ZzHookFunctionEntry));
+    if (!entry)
+        return ZZ_FAILED;
 
-        if (origin_ptr)
-            *origin_ptr = entry->on_invoke_trampoline;
-    } while (0);
-    return status;
+    ZzInitializeHookFunctionEntry(entry, hook_type, target_ptr, replace_call_ptr, pre_call_ptr,
+                                  post_call_ptr, try_near_jump);
+    status = ZzBuildTrampoline(interceptor->backend, entry);
+    if (status == ZZ_FAILED) {
+        if (entry->backend)
+            free(entry->backend);
+        free(entry);
+        return ZZ_FAILED;
+    }
+
+    status = ZzAddHookFunctionEntry(entry);
+    if (status != ZZ_SUCCESS) {
+        if (entry->backend)
+            free(entry->backend);
+        free(entry);
+        return ZZ_FAILED;
+    }
+
+    if (origin_ptr)
+        *origin_ptr = entry->on_invoke_trampoline;
+    return ZZ_DONE_HOOK;
 }
 
 ZZSTATUS ZzBuildHookGOT(zz_ptr_t target_ptr, zz_ptr_t replace_call_ptr, zz_ptr_t *origin_ptr, PRECALL pre_call_ptr,
@@ -289,12 +301,14 @@ ZZSTATUS ZzEnableHook(zz_ptr_t target_ptr) {
         status = ZZ_ALREADY_ENABLED;
         ZZ_ERROR_LOG("%p already enable!", target_ptr);
         return status;
-    } else {
-        entry->isEnabled = true;
     }
 
-    // key function.
-    return ZzActivateTrampoline(interceptor->backend, entry);
+    status = ZzActivateTrampoline(interceptor->backend, entry);
+    if (status == ZZ_FAILED)
+        return status;
+
+    entry->isEnabled = true;
+    return ZZ_DONE_ENABLE;
 }
 
 ZZSTATUS ZzDisableHook(zz_ptr_t target_ptr) {
