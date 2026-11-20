@@ -1,4 +1,5 @@
-#include "interceptor-linux.h"
+#include "hookzz.h"
+#include "kitzz.h"
 
 /*
  * ELF GOT interception is not implemented in this backend yet. Do not report
