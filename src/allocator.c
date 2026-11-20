@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #define DEFAULT_ALLOCATOR_CAPACITY 4
 
@@ -10,10 +11,14 @@ ZzAllocator *ZzNewAllocator() {
         return NULL;
 
     ZzAllocator *allocator;
-    allocator               = (ZzAllocator *)zz_malloc_with_zero(sizeof(ZzAllocator));
-    allocator->memory_pages = (ZzMemoryPage **)zz_malloc_with_zero(sizeof(ZzMemoryPage *) * DEFAULT_ALLOCATOR_CAPACITY);
-    if (!allocator->memory_pages)
+    allocator = (ZzAllocator *)zz_malloc_with_zero(sizeof(ZzAllocator));
+    if (!allocator)
         return NULL;
+    allocator->memory_pages = (ZzMemoryPage **)zz_malloc_with_zero(sizeof(ZzMemoryPage *) * DEFAULT_ALLOCATOR_CAPACITY);
+    if (!allocator->memory_pages) {
+        free(allocator);
+        return NULL;
+    }
     allocator->size     = 0;
     allocator->capacity = DEFAULT_ALLOCATOR_CAPACITY;
     return allocator;
@@ -22,7 +27,6 @@ ZzAllocator *ZzNewAllocator() {
 ZzMemoryPage *ZzNewMemoryPage() {
     zz_size_t page_size = ZzMemoryGetPageSzie();
     zz_ptr_t page_ptr   = NULL;
-    zz_ptr_t cave_ptr   = NULL;
     ZzMemoryPage *page  = NULL;
 
     page_ptr = ZzMemoryAllocatePages(1);
@@ -31,11 +35,15 @@ ZzMemoryPage *ZzNewMemoryPage() {
     }
     if (!ZzMemoryProtectAsExecutable((zz_addr_t)page_ptr, page_size)) {
         ZZ_ERROR_LOG("ZzMemoryProtectAsExecutable error at %p", page_ptr);
-        ZZ_DEBUG_BREAK();
-        exit(1);
+        munmap(page_ptr, page_size);
+        return NULL;
     }
 
-    page            = (ZzMemoryPage *)zz_malloc_with_zero(sizeof(ZzMemoryPage));
+    page = (ZzMemoryPage *)zz_malloc_with_zero(sizeof(ZzMemoryPage));
+    if (!page) {
+        munmap(page_ptr, page_size);
+        return NULL;
+    }
     page->base      = page_ptr;
     page->curr_pos  = page_ptr;
     page->size      = page_size;
@@ -46,7 +54,6 @@ ZzMemoryPage *ZzNewMemoryPage() {
 ZzMemoryPage *ZzNewNearMemoryPage(zz_addr_t address, zz_size_t redirect_range_size) {
     zz_size_t page_size = ZzMemoryGetPageSzie();
     zz_ptr_t page_ptr   = NULL;
-    zz_ptr_t cave_ptr   = NULL;
     ZzMemoryPage *page  = NULL;
 
     page_ptr = ZzMemoryAllocateNearPages(address, redirect_range_size, 1);
@@ -56,11 +63,15 @@ ZzMemoryPage *ZzNewNearMemoryPage(zz_addr_t address, zz_size_t redirect_range_si
 
     if (!ZzMemoryProtectAsExecutable((zz_addr_t)page_ptr, page_size)) {
         ZZ_ERROR_LOG("ZzMemoryProtectAsExecutable error at %p", page_ptr);
-        ZZ_DEBUG_BREAK();
-        exit(1);
+        munmap(page_ptr, page_size);
+        return NULL;
     }
 
     page = (ZzMemoryPage *)zz_malloc_with_zero(sizeof(ZzMemoryPage));
+    if (!page) {
+        munmap(page_ptr, page_size);
+        return NULL;
+    }
 
     page->base = page_ptr;
 
@@ -92,7 +103,9 @@ ZzMemoryPage *ZzNewNearCodeCave(zz_addr_t address, zz_size_t redirect_range_size
     if (!cave_ptr)
         return NULL;
 
-    page             = (ZzMemoryPage *)zz_malloc_with_zero(sizeof(ZzMemoryPage));
+    page = (ZzMemoryPage *)zz_malloc_with_zero(sizeof(ZzMemoryPage));
+    if (!page)
+        return NULL;
     page->base       = cave_ptr;
     page->curr_pos   = cave_ptr;
     page->size       = cave_size;
@@ -102,10 +115,10 @@ ZzMemoryPage *ZzNewNearCodeCave(zz_addr_t address, zz_size_t redirect_range_size
 }
 
 ZZSTATUS ZzAddMemoryPage(ZzAllocator *allocator, ZzMemoryPage *page) {
-    if (!allocator)
+    if (!allocator || !page)
         return ZZ_FAILED;
     if (allocator->size >= allocator->capacity) {
-        ZzMemoryPage **pages = realloc(allocator->memory_pages, sizeof(ZzMemoryPage) * (allocator->capacity) * 2);
+        ZzMemoryPage **pages = realloc(allocator->memory_pages, sizeof(ZzMemoryPage *) * (allocator->capacity) * 2);
         if (!pages) {
             return ZZ_FAILED;
         }
@@ -124,6 +137,9 @@ ZzCodeSlice *ZzNewCodeSlice(ZzAllocator *allocator, zz_size_t code_slice_size) {
     ZzMemoryPage *page      = NULL;
     int i;
 
+    if (!allocator || code_slice_size == 0)
+        return NULL;
+
     for (i = 0; i < allocator->size; i++) {
         page = allocator->memory_pages[i];
         // 1. page is initialized
@@ -137,8 +153,11 @@ ZzCodeSlice *ZzNewCodeSlice(ZzAllocator *allocator, zz_size_t code_slice_size) {
             page->curr_pos += t;
         }
 
-        if (page->base && !page->isCodeCave && (page->size - page->used_size) > code_slice_size) {
-            code_slice       = (ZzCodeSlice *)zz_malloc_with_zero(sizeof(ZzCodeSlice));
+        if (page && page->base && !page->isCodeCave &&
+            page->used_size <= page->size && (page->size - page->used_size) >= code_slice_size) {
+            code_slice = (ZzCodeSlice *)zz_malloc_with_zero(sizeof(ZzCodeSlice));
+            if (!code_slice)
+                return NULL;
             code_slice->data = page->curr_pos;
             code_slice->size = code_slice_size;
 
@@ -149,7 +168,13 @@ ZzCodeSlice *ZzNewCodeSlice(ZzAllocator *allocator, zz_size_t code_slice_size) {
     }
 
     page = ZzNewMemoryPage();
-    ZzAddMemoryPage(allocator, page);
+    if (!page)
+        return NULL;
+    if (ZzAddMemoryPage(allocator, page) != ZZ_SUCCESS) {
+        munmap(page->base, page->size);
+        free(page);
+        return NULL;
+    }
 
     if ((zz_addr_t)page->curr_pos % 4) {
         int t = 4 - (zz_addr_t)page->curr_pos % 4;
@@ -157,7 +182,9 @@ ZzCodeSlice *ZzNewCodeSlice(ZzAllocator *allocator, zz_size_t code_slice_size) {
         page->curr_pos += t;
     }
 
-    code_slice       = (ZzCodeSlice *)zz_malloc_with_zero(sizeof(ZzCodeSlice));
+    code_slice = (ZzCodeSlice *)zz_malloc_with_zero(sizeof(ZzCodeSlice));
+    if (!code_slice)
+        return NULL;
     code_slice->data = page->curr_pos;
     code_slice->size = code_slice_size;
 
