@@ -136,7 +136,7 @@ ZzCodeSlice *ZzNewCodeSlice(ZzAllocator *allocator, zz_size_t code_slice_size) {
     ZzMemoryPage *page      = NULL;
     int i;
 
-    if (!allocator || code_slice_size == 0)
+    if (!allocator || code_slice_size == 0 || code_slice_size > ZzMemoryGetPageSzie())
         return NULL;
 
     for (i = 0; i < allocator->size; i++) {
